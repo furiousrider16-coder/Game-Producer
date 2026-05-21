@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "candela/events",
+  "title": "Candela AI — Grade 3 CT+AI Event Schema Catalogue",
+  "description": "All 11 event types for the Grade 3 CT+AI game suite",
+
+  "definitions": {
+
+    "task_started": {
+      "description": "EVT-01 — Marks start of a measurable cognitive episode",
+      "type": "object",
+      "required": ["task_id", "task_type", "difficulty_level", "max_steps"],
+      "properties": {
+        "task_id":         { "type": "string", "format": "uuid" },
+        "task_type":       { "type": "string", "enum": ["decomposition", "pattern", "abstraction", "algorithmic", "data_repr", "ai_concepts"] },
+        "difficulty_level":{ "type": "integer", "minimum": 1, "maximum": 5, "description": "Bloom-aligned: 1=recall, 5=evaluate" },
+        "max_steps":       { "type": "integer", "minimum": 1 },
+        "time_limit_sec":  { "type": ["integer", "null"], "minimum": 0 },
+        "prompt_text":     { "type": "string" },
+        "stimulus_hash":   { "type": "string", "description": "SHA-256 of displayed stimulus for audit" }
+      }
+    },
+
+    "step_attempted": {
+      "description": "EVT-02 — Atomic unit of measurement. attempts_on_step differentiates fluent retrieval from effortful reasoning",
+      "type": "object",
+      "required": ["task_id", "step_index", "step_type", "response_value", "is_correct", "time_on_step_ms", "attempts_on_step", "help_used"],
+      "properties": {
+        "task_id":          { "type": "string", "format": "uuid" },
+        "step_index":       { "type": "integer", "minimum": 0 },
+        "step_type":        { "type": "string", "enum": ["select", "drag_drop", "sequence", "classify", "draw", "type_input"] },
+        "response_value":   { "type": "object", "description": "Child's raw response — structure varies by step_type" },
+        "is_correct":       { "type": "boolean" },
+        "time_on_step_ms":  { "type": "integer", "minimum": 0 },
+        "attempts_on_step": { "type": "integer", "minimum": 1 },
+        "help_used":        { "type": "boolean" },
+        "confidence_tap":   { "type": ["string", "null"], "enum": ["sure", "unsure", null] }
+      }
+    },
+
+    "hint_requested": {
+      "description": "EVT-03 — Distinguishes strategic help-seeking from distress help-seeking",
+      "type": "object",
+      "required": ["task_id", "step_index", "hint_level", "hint_content_id", "time_since_step_start_ms", "prior_attempts_on_step"],
+      "properties": {
+        "task_id":                    { "type": "string", "format": "uuid" },
+        "step_index":                 { "type": "integer", "minimum": 0 },
+        "hint_level":                 { "type": "integer", "minimum": 1, "maximum": 3, "description": "1=nudge, 2=scaffold, 3=reveal" },
+        "hint_content_id":            { "type": "string" },
+        "time_since_step_start_ms":   { "type": "integer", "minimum": 0 },
+        "prior_attempts_on_step":     { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "sequence_constructed": {
+      "description": "EVT-04 — edit_operations is the richest signal: linear assembly = stronger planning than random-and-correct",
+      "type": "object",
+      "required": ["task_id", "submitted_sequence", "correct_sequence", "edit_operations", "total_edit_time_ms", "submission_attempt"],
+      "properties": {
+        "task_id":            { "type": "string", "format": "uuid" },
+        "submitted_sequence": { "type": "array", "items": { "type": "string" } },
+        "correct_sequence":   { "type": "array", "items": { "type": "string" } },
+        "edit_operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["op", "position", "element_id", "ts_offset_ms"],
+            "properties": {
+              "op":          { "type": "string", "enum": ["insert", "delete", "move"] },
+              "position":    { "type": "integer" },
+              "element_id":  { "type": "string" },
+              "ts_offset_ms":{ "type": "integer" }
+            }
+          }
+        },
+        "total_edit_time_ms": { "type": "integer", "minimum": 0 },
+        "submission_attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "pattern_identified": {
+      "description": "EVT-05 — abstraction_level × is_correct generates difficulty-adjusted score",
+      "type": "object",
+      "required": ["task_id", "pattern_type", "stimulus_id", "identified_unit", "is_correct", "response_time_ms", "abstraction_level"],
+      "properties": {
+        "task_id":          { "type": "string", "format": "uuid" },
+        "pattern_type":     { "type": "string", "enum": ["repeating", "growing", "relational", "data_trend"] },
+        "stimulus_id":      { "type": "string" },
+        "identified_unit":  { "type": "object", "description": "Child's identified rule/unit — structure varies by pattern_type" },
+        "is_correct":       { "type": "boolean" },
+        "confidence_tap":   { "type": ["string", "null"], "enum": ["sure", "unsure", null] },
+        "response_time_ms": { "type": "integer", "minimum": 0 },
+        "abstraction_level":{ "type": "integer", "minimum": 1, "maximum": 3, "description": "1=concrete, 2=semi-abstract, 3=abstract" }
+      }
+    },
+
+    "classification_made": {
+      "description": "EVT-06 — rule_stated is the abstraction detection signal",
+      "type": "object",
+      "required": ["task_id", "item_id", "category_assigned", "correct_category", "is_correct", "num_items_in_task", "item_index"],
+      "properties": {
+        "task_id":          { "type": "string", "format": "uuid" },
+        "item_id":          { "type": "string" },
+        "category_assigned":{ "type": "string" },
+        "correct_category": { "type": "string" },
+        "is_correct":       { "type": "boolean" },
+        "rule_stated":      { "type": ["string", "null"], "description": "Rule child selected, e.g. 'it has wings'" },
+        "num_items_in_task":{ "type": "integer", "minimum": 1 },
+        "item_index":       { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "ai_concept_responded": {
+      "description": "EVT-07 — distractor_chosen enables misconception fingerprinting (M01–M05)",
+      "type": "object",
+      "required": ["task_id", "concept_tested", "question_format", "response_value", "is_correct", "response_time_ms"],
+      "properties": {
+        "task_id":          { "type": "string", "format": "uuid" },
+        "concept_tested":   { "type": "string", "enum": ["training_data", "prediction", "error_correction", "sorting_rule", "decision_tree", "fairness"] },
+        "question_format":  { "type": "string", "enum": ["mcq", "true_false", "drag_label", "scenario_rate"] },
+        "response_value":   { "type": "object" },
+        "is_correct":       { "type": "boolean" },
+        "distractor_chosen":{ "type": ["string", "null"] },
+        "response_time_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "data_representation_submitted": {
+      "description": "EVT-08 — separates encoding accuracy from representational completeness",
+      "type": "object",
+      "required": ["task_id", "representation_type", "data_source_id", "submitted_repr", "accuracy_score", "completeness_score", "label_accuracy"],
+      "properties": {
+        "task_id":              { "type": "string", "format": "uuid" },
+        "representation_type":  { "type": "string", "enum": ["tally", "pictograph", "bar_chart", "table", "sort"] },
+        "data_source_id":       { "type": "string" },
+        "submitted_repr":       { "type": "object", "description": "Structured representation child built — schema varies per type" },
+        "accuracy_score":       { "type": "number", "minimum": 0, "maximum": 1 },
+        "completeness_score":   { "type": "number", "minimum": 0, "maximum": 1 },
+        "label_accuracy":       { "type": "boolean" }
+      }
+    },
+
+    "self_correction_made": {
+      "description": "EVT-09 — before_submit corrections are the highest-value metacognition signal",
+      "type": "object",
+      "required": ["task_id", "step_index", "correction_type", "original_response", "corrected_response", "time_to_correction_ms", "resulted_in_correct"],
+      "properties": {
+        "task_id":                 { "type": "string", "format": "uuid" },
+        "step_index":              { "type": "integer", "minimum": 0 },
+        "correction_type":         { "type": "string", "enum": ["before_submit", "after_wrong_feedback", "unprompted_review"] },
+        "original_response":       { "type": "object" },
+        "corrected_response":      { "type": "object" },
+        "time_to_correction_ms":   { "type": "integer", "minimum": 0 },
+        "resulted_in_correct":     { "type": "boolean" }
+      }
+    },
+
+    "task_abandoned": {
+      "description": "EVT-10 — high hints + low completion = productive struggle; zero hints + low completion = motivation failure",
+      "type": "object",
+      "required": ["task_id", "steps_completed", "total_steps", "last_step_index", "time_in_task_ms", "hint_count", "abandon_trigger"],
+      "properties": {
+        "task_id":          { "type": "string", "format": "uuid" },
+        "steps_completed":  { "type": "integer", "minimum": 0 },
+        "total_steps":      { "type": "integer", "minimum": 1 },
+        "last_step_index":  { "type": "integer", "minimum": 0 },
+        "time_in_task_ms":  { "type": "integer", "minimum": 0 },
+        "hint_count":       { "type": "integer", "minimum": 0 },
+        "abandon_trigger":  { "type": "string", "enum": ["timeout", "navigation", "idle_30s", "explicit_exit"] }
+      }
+    },
+
+    "task_completed": {
+      "description": "EVT-11 — session closing event. Use component events for scoring, not final_score_raw",
+      "type": "object",
+      "required": ["task_id", "total_time_ms", "steps_correct_first_try", "total_steps", "total_hints_used", "total_self_corrections", "final_score_raw", "difficulty_level"],
+      "properties": {
+        "task_id":                   { "type": "string", "format": "uuid" },
+        "total_time_ms":             { "type": "integer", "minimum": 0 },
+        "steps_correct_first_try":   { "type": "integer", "minimum": 0 },
+        "total_steps":               { "type": "integer", "minimum": 1 },
+        "total_hints_used":          { "type": "integer", "minimum": 0 },
+        "total_self_corrections":    { "type": "integer", "minimum": 0 },
+        "final_score_raw":           { "type": "number", "minimum": 0, "maximum": 100 },
+        "difficulty_level":          { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "candela/competency_scores",
+  "title": "Candela AI — Competency Score & Behavioral Index Schema",
+
+  "definitions": {
+
+    "score_label": {
+      "type": "string",
+      "enum": ["Emerging", "Developing", "Proficient"],
+      "description": "Emerging: 0–39 | Developing: 40–69 | Proficient: 70–100"
+    },
+
+    "domain_score": {
+      "type": "object",
+      "required": ["domain", "raw_score", "label", "session_count", "mastery_achieved"],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": ["decomposition", "pattern_recognition", "abstraction", "algorithmic_thinking", "data_representation", "ai_concepts"]
+        },
+        "raw_score":       { "type": "number", "minimum": 0, "maximum": 100 },
+        "label":           { "$ref": "#/definitions/score_label" },
+        "session_count":   { "type": "integer", "minimum": 1, "description": "Number of sessions contributing to this score" },
+        "mastery_achieved":{ "type": "boolean", "description": "True only if score >= 70 across >= 2 sessions" },
+        "sub_scores": {
+          "type": "object",
+          "description": "Domain-specific component scores",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+
+    "behavioral_indices": {
+      "type": "object",
+      "required": ["persistence_index", "self_correction_rate", "hint_dependency_score", "speed_accuracy_tradeoff", "conceptual_transfer_index"],
+      "properties": {
+        "persistence_index": {
+          "type": "number", "minimum": 0, "maximum": 1,
+          "description": "PI = (tasks_with_>=2_attempts_eventually_correct / tasks_with_>=2_attempts) × (1 - abandon_rate). >0.75=high, 0.40–0.75=moderate, <0.40=low"
+        },
+        "self_correction_rate": {
+          "type": "number", "minimum": 0, "maximum": 1,
+          "description": "SCR = unprompted_corrections / (total_submissions - first_submissions). >0.60=strong, 0.25–0.60=moderate, <0.25=weak"
+        },
+        "hint_dependency_score": {
+          "type": "number", "minimum": 0, "maximum": 1,
+          "description": "HDS = weighted hint count / max possible. <0.15=independent, 0.15–0.40=strategic, >0.40=hint-reliant"
+        },
+        "speed_accuracy_tradeoff": {
+          "type": ["number", "null"], "minimum": -1, "maximum": 1,
+          "description": "SATI = pearson_correlation(normalized_time, accuracy). +1=reflective, 0=consistent, -1+high_acc=mastery, -1+low_acc=impulsive"
+        },
+        "conceptual_transfer_index": {
+          "type": ["number", "null"], "minimum": 0,
+          "description": "CTI = far_transfer_accuracy / near_transfer_accuracy. >0.80=strong, 0.50–0.80=partial, <0.50=surface learning"
+        }
+      }
+    },
+
+    "misconception_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["misconception_id", "label", "confirmed", "trigger_count"],
+        "properties": {
+          "misconception_id": { "type": "string", "enum": ["M01", "M02", "M03", "M04", "M05"] },
+          "label": {
+            "type": "string",
+            "enum": [
+              "AI is always right (over-trust)",
+              "AI thinks/feels like humans (anthropomorphization)",
+              "More data is always better (data quality blindspot)",
+              "AI rules are permanent / cannot be changed",
+              "Only computers can do AI tasks"
+            ]
+          },
+          "confirmed":      { "type": "boolean", "description": "True if same distractor chosen in >= 2 separate tasks" },
+          "trigger_count":  { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+
+    "student_session_profile": {
+      "type": "object",
+      "required": ["student_id", "session_id", "date", "domain_scores", "behavioral_indices"],
+      "properties": {
+        "student_id":          { "type": "string", "format": "uuid" },
+        "session_id":          { "type": "string", "format": "uuid" },
+        "date":                { "type": "string", "format": "date" },
+        "grade":               { "type": "integer", "const": 3 },
+        "domain_scores":       { "type": "array", "items": { "$ref": "#/definitions/domain_score" } },
+        "behavioral_indices":  { "$ref": "#/definitions/behavioral_indices" },
+        "misconception_flags": { "$ref": "#/definitions/misconception_flags" },
+        "teacher_dashboard": {
+          "type": "object",
+          "properties": {
+            "strongest_domain":  { "type": "string" },
+            "weakest_domain":    { "type": "string" },
+            "effort_summary":    { "type": "string", "description": "Plain-language effort/independence description" },
+            "next_step":         { "type": "string", "description": "Single actionable recommendation for teacher" }
+          }
+        }
+      }
+    }
+  }
+}

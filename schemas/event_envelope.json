@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "candela/event_envelope",
+  "title": "Candela AI Event Envelope",
+  "description": "Standard wrapper for all Candela AI telemetry events",
+  "type": "object",
+  "required": ["session_id", "student_id", "game_id", "event_name", "event_seq", "client_ts", "server_ts", "app_version", "device_type"],
+  "properties": {
+    "session_id":   { "type": "string", "format": "uuid" },
+    "student_id":   { "type": "string", "format": "uuid", "description": "Pseudonymous — real identity held only in school identity service" },
+    "game_id": {
+      "type": "string",
+      "enum": ["recipe_rescue", "copycat_tiles", "shadow_sort", "botleys_big_day", "dino_tally_dash", "zara_learns"]
+    },
+    "event_name":   { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "event_seq":    { "type": "integer", "minimum": 1, "description": "Monotonic counter within session" },
+    "client_ts":    { "type": "string", "format": "date-time" },
+    "server_ts":    { "type": "string", "format": "date-time" },
+    "app_version":  { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "device_type":  { "type": "string", "enum": ["tablet", "chromebook", "desktop"] },
+    "payload":      { "type": "object", "description": "Event-specific payload — see individual event schemas" }
+  }
+}

@@ -113,25 +113,9 @@ const LEVELS = [
   },
 ];
 
-// ── Telemetry ────────────────────────────────────────────────────────
-const _sessionId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-let _eventSeq = 0;
-
-function _studentId() {
-  let id = localStorage.getItem('candela_student_id');
-  if (!id) { id = 'stu_' + Math.random().toString(36).slice(2, 8); localStorage.setItem('candela_student_id', id); }
-  return id;
-}
-
-function emit(name, payload) {
-  const ev = { session_id: _sessionId, student_id: _studentId(), game_id: 'recipe_rescue', event_name: name, event_seq: ++_eventSeq, client_ts: new Date().toISOString(), payload };
-  try {
-    const arr = JSON.parse(localStorage.getItem('candela_events') || '[]');
-    arr.push(ev);
-    localStorage.setItem('candela_events', JSON.stringify(arr));
-  } catch (_) {}
-  console.debug('[Candela]', name, payload);
-}
+// ── Logger ────────────────────────────────────────────────────────────
+// RecipeRescueLogger is loaded from logger.js (declared via <script> in index.html)
+let rrLogger;
 
 // ── State ────────────────────────────────────────────────────────────
 let S = {};
@@ -139,15 +123,22 @@ let S = {};
 function buildState(n) {
   return {
     levelNum: n,
+    taskId: `lvl${n}`,
     lvl: LEVELS[n],
-    sequence: [],       // array of step ids in order
+    sequence: [],
     attempts: 0,
     hintsUsed: 0,
+    selfCorrections: 0,
     isRunning: false,
+    lastRunCrashed: false,
     sessionStart: Date.now(),
     timerInterval: null,
     dragSrcIdx: null,
-    cardPickupTimes: {},  // stepId → timestamp of pickup
+    cardPickupTimes: {},    // stepId → timestamp when card was tapped
+    cardDwellTimes: {},     // stepId → ms between pickup and placement
+    cardAttemptCounts: {},  // stepId → total placement count (for firstTry detection)
+    editOps: [],            // ordered list of insert/delete ops for sequenceConstructed
+    editStartMs: null,      // timestamp of first card added in this build attempt
   };
 }
 
@@ -165,33 +156,89 @@ function stopTimer() { clearInterval(S.timerInterval); }
 // ── Card management ───────────────────────────────────────────────────
 function addCardToSequence(stepId) {
   if (S.isRunning) return;
-  if (S.sequence.includes(stepId)) return; // already in sequence
-  S.cardPickupTimes[stepId] = Date.now();
-  emit('card_pickup', { card_id: stepId, timestamp: new Date().toISOString(), attempt_number: S.attempts });
+  if (S.sequence.includes(stepId)) return;
+
+  const step = S.lvl.steps.find(s => s.id === stepId);
+  const now = Date.now();
+  const dwellMs = S.cardPickupTimes[stepId] ? now - S.cardPickupTimes[stepId] : 0;
+
+  if (!S.editStartMs) S.editStartMs = now;
+  S.cardPickupTimes[stepId] = now;
+  S.cardDwellTimes[stepId]  = dwellMs;
+  S.cardAttemptCounts[stepId] = (S.cardAttemptCounts[stepId] || 0) + 1;
+
+  const slotIndex = S.sequence.length;
   S.sequence.push(stepId);
-  emit('card_placed', { card_id: stepId, slot_index: S.sequence.length - 1, timestamp: new Date().toISOString() });
+
+  S.editOps.push({ op: 'insert', position: slotIndex, element_id: stepId, ts_offset_ms: now - S.editStartMs });
+
+  rrLogger.cardPickup({ taskId: S.taskId, cardId: stepId, isDecoy: !step.required, attemptNumber: S.attempts });
+  rrLogger.cardPlaced({ taskId: S.taskId, cardId: stepId, slotIndex, isDecoy: !step.required, dwellTimeBeforePlaceMs: dwellMs });
+
   renderAll();
 }
 
 function removeCardFromSequence(idx) {
   if (S.isRunning) return;
   const stepId = S.sequence[idx];
+  const step = S.lvl.steps.find(s => s.id === stepId);
+  const wasDecoy = !step.required;
   const dwellMs = S.cardPickupTimes[stepId] ? Date.now() - S.cardPickupTimes[stepId] : 0;
-  emit('card_removed', { card_id: stepId, from_slot: idx, timestamp: new Date().toISOString(), dwell_time_ms: dwellMs, trigger: 'self' });
+  // 'crash' = removed after a failed run; 'self' = proactive removal before any run or after reviewing
+  const trigger = S.lastRunCrashed ? 'crash' : 'self';
+
+  const now = Date.now();
+  if (!S.editStartMs) S.editStartMs = now;
+  S.editOps.push({ op: 'delete', position: idx, element_id: stepId, ts_offset_ms: now - S.editStartMs });
+
   S.sequence.splice(idx, 1);
+
+  rrLogger.cardRemoved({
+    taskId: S.taskId, cardId: stepId, fromSlot: idx,
+    dwellTimeInSlotMs: dwellMs, trigger, wasDecoy, removedBeforeSubmit: true,
+  });
+
+  if (wasDecoy) {
+    rrLogger.decoyRemoved({ taskId: S.taskId, cardId: stepId, timeInSlotMs: dwellMs, removedBy: trigger });
+    // Self-removal of a decoy before submit = metacognition signal
+    if (trigger === 'self') {
+      S.selfCorrections++;
+      rrLogger.selfCorrectionMade({
+        taskId: S.taskId, stepIndex: idx, correctionType: 'before_submit',
+        originalCard: stepId, correctedCard: null,
+        timeToCorrectMs: dwellMs, resultedInCorrect: true,
+      });
+    }
+  }
+
   renderAll();
 }
 
 function clearSequence() {
   if (S.isRunning) return;
-  S.sequence = [];
+  // Log each removal as a system clear
+  S.sequence.forEach((stepId, idx) => {
+    const step = S.lvl.steps.find(s => s.id === stepId);
+    const wasDecoy = !step.required;
+    rrLogger.cardRemoved({
+      taskId: S.taskId, cardId: stepId, fromSlot: idx,
+      dwellTimeInSlotMs: S.cardPickupTimes[stepId] ? Date.now() - S.cardPickupTimes[stepId] : 0,
+      trigger: 'system', wasDecoy, removedBeforeSubmit: true,
+    });
+    if (wasDecoy) rrLogger.decoyRemoved({ taskId: S.taskId, cardId: stepId, timeInSlotMs: 0, removedBy: 'system' });
+  });
+  S.sequence  = [];
+  S.editOps   = [];
+  S.editStartMs = null;
   renderAll();
 }
 
 function reorderSequence(fromIdx, toIdx) {
   if (fromIdx === null || fromIdx === toIdx) return;
-  const [id] = S.sequence.splice(fromIdx, 1);
-  S.sequence.splice(toIdx, 0, id);
+  const cardId = S.sequence[fromIdx];
+  S.sequence.splice(fromIdx, 1);
+  S.sequence.splice(toIdx, 0, cardId);
+  rrLogger.sequenceReordered({ taskId: S.taskId, cardId, fromSlot: fromIdx, toSlot: toIdx, afterCrash: S.lastRunCrashed });
   renderAll();
 }
 
@@ -204,8 +251,6 @@ function renderAll() {
 function renderCardTray() {
   const tray = document.getElementById('card-tray');
   tray.innerHTML = '';
-  const lvl = S.lvl;
-  // Shuffle cards once per level load (stored in state)
   S.shuffledSteps.forEach(step => {
     const card = document.createElement('div');
     card.className = 'tray-card' + (S.sequence.includes(step.id) ? ' used' : '');
@@ -223,7 +268,6 @@ function renderSequence() {
   S.sequence.forEach((stepId, idx) => {
     const step = lvl.steps.find(s => s.id === stepId);
 
-    // Slot label for L1
     if (lvl.showSlotLabels && lvl.slotLabels[idx]) {
       const lbl = document.createElement('div');
       lbl.className = 'slot-label';
@@ -295,6 +339,7 @@ async function runRecipe() {
   if (S.sequence.length === 0) { toast('Add some steps first! 👆', 'info'); return; }
 
   S.isRunning = true;
+  S.lastRunCrashed = false;
   S.attempts++;
   document.getElementById('attempt-num').textContent = S.attempts;
   setControlsEnabled(false);
@@ -302,15 +347,23 @@ async function runRecipe() {
   setRobot('👨‍🍳', 'Let\'s cook!', 'running');
 
   const submittedSeq = [...S.sequence];
-  emit('sequence_submitted', {
-    task_id: `lvl${S.levelNum}_attempt${S.attempts}`,
-    full_sequence_array: submittedSeq,
-    attempt_number: S.attempts,
-    time_elapsed_ms: Date.now() - S.sessionStart,
+  const correctSeq   = S.lvl.steps.filter(s => s.required).sort((a,b) => a.order - b.order).map(s => s.id);
+
+  rrLogger.sequenceConstructed({
+    taskId: S.taskId,
+    submittedSequence: submittedSeq,
+    correctSequence:   correctSeq,
+    editOperations:    S.editOps,
+    totalEditTimeMs:   S.editStartMs ? Date.now() - S.editStartMs : 0,
+    submissionAttempt: S.attempts,
   });
 
+  // Reset edit tracking for the next build attempt
+  S.editOps     = [];
+  S.editStartMs = null;
+
   const lvl = S.lvl;
-  let crashed = false;
+  let crashed  = false;
   let crashIdx = -1;
 
   for (let i = 0; i < submittedSeq.length; i++) {
@@ -320,44 +373,58 @@ async function runRecipe() {
     highlightSeqCard(i, 'active-step');
     await sleep(500);
 
-    // Check: is this a decoy?
+    // ── Decoy check ───────────────────────────────────────────────
     if (!step.required) {
-      crashed = true;
+      crashed  = true;
       crashIdx = i;
       highlightSeqCard(i, 'error-step');
-      const msg = lvl.robotDecoyMsg[stepId] || `That doesn\'t belong here! 😕`;
+      const msg = lvl.robotDecoyMsg[stepId] || 'That doesn\'t belong here! 😕';
       setRobot('😵', msg, 'error');
       addLog(`✗ Step ${i+1}: "${step.text}" — not needed!`, 'err');
-      emit('decoy_placed', { card_id: stepId, slot_index: i, dwell_time_before_place: Date.now() - (S.cardPickupTimes[stepId] || Date.now()) });
+
+      rrLogger.stepAttempted({ taskId: S.taskId, stepIndex: i, cardId: stepId, isCorrect: false, timeOnStepMs: S.cardDwellTimes[stepId] || 0, attemptsOnStep: S.cardAttemptCounts[stepId] || 1, helpUsed: S.hintsUsed > 0 });
+      rrLogger.decoyPlaced({ taskId: S.taskId, cardId: stepId, slotIndex: i, dwellTimeBeforePlaceMs: S.cardDwellTimes[stepId] || 0 });
+
       await sleep(900);
+
+      rrLogger.robotFailureWatched({ taskId: S.taskId, crashStepIndex: i, crashType: 'decoy_included', didWatchFull: true, replayCount: 0 });
       break;
     }
 
-    // Check: ordering constraint violated?
+    // ── Order constraint check ────────────────────────────────────
     const violation = checkOrderViolation(submittedSeq, stepId, i, lvl);
     if (violation) {
-      crashed = true;
+      crashed  = true;
       crashIdx = i;
       highlightSeqCard(i, 'error-step');
       setRobot('🤔', `Hmm, "${violation.before}" should come before "${violation.after}"!`, 'error');
       addLog(`✗ Step ${i+1}: wrong order — "${violation.before}" must come first`, 'err');
+
+      rrLogger.stepAttempted({ taskId: S.taskId, stepIndex: i, cardId: stepId, isCorrect: false, timeOnStepMs: S.cardDwellTimes[stepId] || 0, attemptsOnStep: S.cardAttemptCounts[stepId] || 1, helpUsed: S.hintsUsed > 0 });
+      rrLogger.orderViolationDetected({ taskId: S.taskId, attemptNumber: S.attempts, violatingCardId: stepId, mustComeBeforeId: violation.beforeId, detectedAtSlot: i });
+
       await sleep(900);
+
+      rrLogger.robotFailureWatched({ taskId: S.taskId, crashStepIndex: i, crashType: 'wrong_order', didWatchFull: true, replayCount: 0 });
       break;
     }
 
-    // Step OK
+    // ── Step OK ───────────────────────────────────────────────────
+    rrLogger.stepAttempted({ taskId: S.taskId, stepIndex: i, cardId: stepId, isCorrect: true, timeOnStepMs: S.cardDwellTimes[stepId] || 0, attemptsOnStep: S.cardAttemptCounts[stepId] || 1, helpUsed: S.hintsUsed > 0 });
+
     setRobot('😊', `${step.emoji} ${step.text}...`, 'success');
     addLog(`✓ ${step.emoji} ${step.text}`, 'ok');
     await sleep(350);
   }
 
   if (!crashed) {
-    // Check all required steps are present
     const missing = lvl.steps.filter(s => s.required && !submittedSeq.includes(s.id));
     if (missing.length > 0) {
-      setRobot('😟', `I\'m missing some steps!`, 'error');
+      S.lastRunCrashed = true;
+      setRobot('😟', 'I\'m missing some steps!', 'error');
       addLog(`✗ Missing: ${missing.map(s => s.text).join(', ')}`, 'err');
       toast(`Missing steps: ${missing.map(s => s.text).join(', ')}`, 'error');
+      rrLogger.robotFailureWatched({ taskId: S.taskId, crashStepIndex: submittedSeq.length, crashType: 'missing_required', didWatchFull: true, replayCount: 0 });
     } else {
       // WIN
       document.querySelectorAll('.seq-card').forEach(c => c.classList.remove('active-step', 'error-step'));
@@ -367,8 +434,8 @@ async function runRecipe() {
       handleWin();
     }
   } else {
+    S.lastRunCrashed = true;
     toast('Chef Bot got confused! Fix the step that caused the problem.', 'error');
-    emit('sequence_submitted', { card_id: submittedSeq[crashIdx], post_crash_flag: true });
   }
 
   document.querySelectorAll('.seq-card').forEach(c => c.classList.remove('active-step'));
@@ -377,14 +444,11 @@ async function runRecipe() {
 }
 
 function checkOrderViolation(seq, currentId, currentIdx, lvl) {
-  // For each constraint [before, after]: if current = after, then before must already be in seq[0..currentIdx-1]
   for (const [before, after] of lvl.orderConstraints) {
-    if (after === currentId) {
-      if (!seq.slice(0, currentIdx).includes(before)) {
-        const beforeStep = lvl.steps.find(s => s.id === before);
-        const afterStep  = lvl.steps.find(s => s.id === after);
-        return { before: beforeStep?.text, after: afterStep?.text };
-      }
+    if (after === currentId && !seq.slice(0, currentIdx).includes(before)) {
+      const beforeStep = lvl.steps.find(s => s.id === before);
+      const afterStep  = lvl.steps.find(s => s.id === after);
+      return { before: beforeStep?.text, after: afterStep?.text, beforeId: before, afterId: after };
     }
   }
   return null;
@@ -396,14 +460,21 @@ function handleWin() {
   const m = Math.floor(elapsed / 60), sec = elapsed % 60;
   const decoysPlaced = S.sequence.filter(id => !S.lvl.steps.find(s => s.id === id)?.required).length;
 
-  emit('task_completed', {
-    task_id: `lvl${S.levelNum}`,
-    total_time_ms: Date.now() - S.sessionStart,
-    steps_correct_first_try: S.attempts === 1 ? S.sequence.length : 0,
-    total_steps: S.sequence.length,
-    total_hints_used: S.hintsUsed,
-    final_score_raw: Math.max(0, 100 - (S.attempts - 1) * 15 - S.hintsUsed * 5 - decoysPlaced * 10),
-    difficulty_level: S.levelNum,
+  // Count required steps placed correctly on first attempt (attempt count = 1)
+  const stepsCorrectFirstTry = S.lvl.steps
+    .filter(s => s.required && S.cardAttemptCounts[s.id] === 1)
+    .length;
+
+  rrLogger.taskCompleted({
+    taskId:               S.taskId,
+    totalTimeMs:          Date.now() - S.sessionStart,
+    stepsCorrectFirstTry,
+    totalSteps:           S.lvl.optimalSteps,
+    hintsUsed:            S.hintsUsed,
+    selfCorrections:      S.selfCorrections,
+    finalScoreRaw:        Math.max(0, 100 - (S.attempts - 1) * 15 - S.hintsUsed * 5 - decoysPlaced * 10),
+    difficultyLevel:      S.levelNum,
+    wonOnFirstAttempt:    S.attempts === 1,
   });
 
   document.getElementById('win-emoji').textContent = S.attempts === 1 ? '🏆' : '🎉';
@@ -422,7 +493,12 @@ function handleWin() {
 function requestHint() {
   if (S.isRunning) return;
   S.hintsUsed++;
-  emit('hint_requested', { task_id: `lvl${S.levelNum}`, hint_level: Math.min(S.hintsUsed, 3), time_since_start_ms: Date.now() - S.sessionStart, prior_attempts: S.attempts });
+  rrLogger.hintRequested({
+    taskId:           S.taskId,
+    hintLevel:        Math.min(S.hintsUsed, 3),
+    timeSinceStartMs: Date.now() - S.sessionStart,
+    priorAttempts:    S.attempts,
+  });
   toast('💡 ' + S.lvl.hint, 'info', 5000);
 }
 
@@ -451,14 +527,12 @@ function toast(msg, type = 'info', duration = 3000) {
 function loadLevel(n) {
   if (S.timerInterval) clearInterval(S.timerInterval);
 
-  // Hide modals and re-enable controls FIRST
+  // Hide modals and re-enable controls BEFORE any payload construction
   document.getElementById('win-modal').classList.add('hidden');
   document.getElementById('done-modal').classList.add('hidden');
   setControlsEnabled(true);
 
   S = buildState(n);
-
-  // Shuffle card order once (Fisher-Yates)
   S.shuffledSteps = [...LEVELS[n].steps].sort(() => Math.random() - 0.5);
 
   document.getElementById('level-num').textContent = n;
@@ -473,14 +547,12 @@ function loadLevel(n) {
   renderAll();
   startTimer();
 
-  emit('task_started', {
-    task_id: `lvl${n}`,
-    task_type: 'decomposition',
-    difficulty_level: n,
-    max_steps: LEVELS[n].steps.filter(s => s.required).length,
-    time_limit_sec: 480,
-    prompt_text: LEVELS[n].taskDesc,
-    stimulus_hash: `rr_lvl${n}_${LEVELS[n].steps.length}cards`,
+  rrLogger.taskStarted({
+    taskId:       S.taskId,
+    levelNum:     n,
+    maxSteps:     LEVELS[n].steps.filter(s => s.required).length,
+    timeLimitSec: 480,
+    promptText:   LEVELS[n].taskDesc,
   });
 }
 
@@ -491,6 +563,8 @@ function nextLevel() {
   } else {
     document.getElementById('win-modal').classList.add('hidden');
     document.getElementById('done-modal').classList.remove('hidden');
+    // All levels complete — export full session to localStorage
+    rrLogger.exportSession();
   }
 }
 
@@ -500,4 +574,7 @@ function restartGame() { loadLevel(1); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ── Boot ──────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => loadLevel(1));
+window.addEventListener('DOMContentLoaded', () => {
+  rrLogger = new RecipeRescueLogger();
+  loadLevel(1);
+});

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recipe Rescue 🍳</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div id="level-badge">Level <span id="level-num">1</span> of 3</div>
+    <h1>Recipe Rescue 🍳</h1>
+    <div id="timer">⏱ <span id="time-display">0:00</span></div>
+  </header>
+
+  <div id="status-bar">
+    <span id="task-desc"></span>
+    <span id="attempt-label">Attempt: <span id="attempt-num">1</span></span>
+  </div>
+
+  <main id="game-area">
+
+    <!-- LEFT: Chef Bot + execution display -->
+    <section id="chef-panel">
+      <div id="robot-wrap">
+        <div id="robot-face">👨‍🍳</div>
+        <div id="robot-bubble" class="hidden"></div>
+      </div>
+      <div id="dish-goal">
+        <div id="dish-emoji"></div>
+        <div id="dish-name"></div>
+      </div>
+      <div id="exec-log"></div>
+    </section>
+
+    <!-- CENTER: Sequence slots -->
+    <section id="sequence-panel">
+      <div id="seq-header">
+        <h2>Your Recipe</h2>
+        <span id="seq-count">0 steps</span>
+      </div>
+      <div id="sequence"></div>
+    </section>
+
+    <!-- RIGHT: Available cards -->
+    <section id="cards-panel">
+      <div id="cards-header">Available Steps — tap to add:</div>
+      <div id="card-tray"></div>
+      <div id="controls">
+        <button id="run-btn"   class="ctrl run"   onclick="runRecipe()">▶ RUN</button>
+        <button id="reset-btn" class="ctrl reset" onclick="resetRun()">↺ RESET</button>
+        <button id="clear-btn" class="ctrl clear" onclick="clearSequence()">🗑 CLEAR</button>
+        <button id="hint-btn"  class="ctrl hint"  onclick="requestHint()">💡 HINT</button>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="hidden"></div>
+
+  <div id="win-modal" class="modal hidden">
+    <div class="modal-box">
+      <div id="win-emoji">🎉</div>
+      <h2 id="win-title">Level Complete!</h2>
+      <div id="win-stats"></div>
+      <button id="next-btn" onclick="nextLevel()">Next Level →</button>
+    </div>
+  </div>
+
+  <div id="done-modal" class="modal hidden">
+    <div class="modal-box">
+      <div style="font-size:3rem">🏆</div>
+      <h2>All Recipes Rescued!</h2>
+      <p style="color:#94a3b8;margin-top:8px">Chef Bot is so proud of you!</p>
+      <button onclick="restartGame()">Play Again</button>
+    </div>
+  </div>
+
+</div>
+<script src="game.js"></script>
+</body>
+</html>

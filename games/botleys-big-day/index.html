@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Botley's Big Day 🤖</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <header id="hdr">
+      <div id="level-badge">Level <span id="level-num">1</span> of 3</div>
+      <h1>Botley's Big Day 🤖</h1>
+      <div id="timer">⏱ <span id="time-display">0:00</span></div>
+    </header>
+
+    <div id="status-bar">
+      <span id="task-desc"></span>
+      <span id="attempt-label">Attempt: <span id="attempt-num">1</span></span>
+    </div>
+
+    <main id="game-area">
+
+      <!-- LEFT: Grid World -->
+      <section id="grid-panel">
+        <div id="grid-wrap">
+          <div id="grid"></div>
+        </div>
+        <div id="grid-legend">
+          <span>🤖 Botley</span>
+          <span>🏁 Goal</span>
+          <span>🧱 Wall</span>
+          <span>⭐💎 Collect</span>
+        </div>
+      </section>
+
+      <!-- RIGHT: Program Panel -->
+      <section id="program-panel">
+
+        <div id="stack-header">
+          <h2>Botley's Program</h2>
+          <span id="block-count">0 blocks</span>
+        </div>
+
+        <div id="instruction-stack"></div>
+
+        <div id="palette-header">Add Instructions:</div>
+        <div id="palette">
+          <button class="pal-btn move-btn"  onclick="addBlock('MOVE')">
+            <span class="b-icon">🚶</span><span class="b-lbl">MOVE</span>
+          </button>
+          <button class="pal-btn turn-btn"  onclick="addBlock('TURN_LEFT')">
+            <span class="b-icon">↩️</span><span class="b-lbl">TURN LEFT</span>
+          </button>
+          <button class="pal-btn turn-btn"  onclick="addBlock('TURN_RIGHT')">
+            <span class="b-icon">↪️</span><span class="b-lbl">TURN RIGHT</span>
+          </button>
+          <button class="pal-btn pick-btn"  onclick="addBlock('PICK_UP')">
+            <span class="b-icon">✋</span><span class="b-lbl">PICK UP</span>
+          </button>
+          <button class="pal-btn put-btn"   onclick="addBlock('PUT_DOWN')">
+            <span class="b-icon">📥</span><span class="b-lbl">PUT DOWN</span>
+          </button>
+          <button class="pal-btn rep-btn" id="repeat-pal-btn" style="display:none" onclick="addBlock('REPEAT')">
+            <span class="b-icon">🔄</span><span class="b-lbl">REPEAT ×?</span>
+          </button>
+        </div>
+
+        <div id="controls">
+          <button id="run-btn"   class="ctrl run"   onclick="runProgram()">▶ RUN</button>
+          <button id="reset-btn" class="ctrl reset" onclick="resetRun()">↺ RESET</button>
+          <button id="clear-btn" class="ctrl clear" onclick="clearProgram()">🗑 CLEAR</button>
+          <button id="hint-btn"  class="ctrl hint"  onclick="requestHint()">💡 HINT</button>
+        </div>
+
+      </section>
+    </main>
+
+    <!-- Crash / feedback toast -->
+    <div id="toast" class="hidden"></div>
+
+    <!-- Win modal -->
+    <div id="win-modal" class="modal hidden">
+      <div class="modal-box">
+        <div id="win-emoji">🎉</div>
+        <h2 id="win-title">Level Complete!</h2>
+        <div id="win-stats"></div>
+        <div id="win-actions">
+          <button id="next-btn" onclick="nextLevel()">Next Level →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Over modal (all levels done) -->
+    <div id="done-modal" class="modal hidden">
+      <div class="modal-box">
+        <div style="font-size:3rem">🏆</div>
+        <h2>You finished all levels!</h2>
+        <p>Botley is so proud of you.</p>
+        <button onclick="restartGame()">Play Again</button>
+      </div>
+    </div>
+
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
